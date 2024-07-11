@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BLAST השוואת רצפים</title>
+    <title>BLAST השוואת רצפים - מתקדם</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -20,7 +20,7 @@
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
-        h1 {
+        h1, h2 {
             text-align: center;
             color: #333;
         }
@@ -32,7 +32,7 @@
             margin-bottom: 5px;
             font-weight: bold;
         }
-        select, textarea {
+        select, textarea, input[type="number"] {
             width: 100%;
             padding: 8px;
             margin-bottom: 10px;
@@ -67,11 +67,44 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+        .loading {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .loading::after {
+            content: '\2026';
+            animation: dots 1s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: '\2026'; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80% { content: '...'; }
+        }
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .result-table th, .result-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: right;
+        }
+        .result-table th {
+            background-color: #f2f2f2;
+        }
+        .hidden {
+            display: none;
+        }
+        #sampleSequences {
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>BLAST השוואת רצפים</h1>
+        <h1>BLAST השוואת רצפים - מתקדם</h1>
         <form id="blastForm">
             <label for="program">תוכנית BLAST:</label>
             <select id="program" required>
@@ -91,29 +124,46 @@
                 <option value="swissprot">UniProtKB/Swiss-Prot</option>
             </select>
             
+            <label for="sampleSequences">רצפים לדוגמא:</label>
+            <select id="sampleSequences">
+                <option value="">בחר רצף לדוגמא</option>
+                <option value="AGCCCTCCAGGACAGGCTGCATCAGAAGAGGCCATCAAGCAGGTCTGTTCCAAGGGCCTTTGCGTCAGGTGGGCTCAGGATTCCAGGGTGGCTGGACCCCAGGCCCCAGCTCTGCAGCAGGGAGGACGTGGCTGGGCTCGTGAAGCATGTGGGGGTGAGCCCAGGGGCCCCAAGGCAGGGCACCTGGCCTTCAGCCTGCCTCAGCCCTGC">גן האינסולין האנושי (DNA)</option>
+                <option value="MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQVGQVELGGGPGAGSLQPLALEGSLQKRGIVEQCCTSICSLYQLENYCN">חלבון האינסולין האנושי</option>
+            </select>
+            
             <label for="sequence">רצף החיפוש:</label>
             <textarea id="sequence" required placeholder="הכנס את רצף ה-DNA או החלבון כאן"></textarea>
             
+            <label for="maxResults">מספר תוצאות מקסימלי:</label>
+            <input type="number" id="maxResults" value="10" min="1" max="100">
+            
             <button type="submit">בצע BLAST</button>
         </form>
-        <div id="status"></div>
-        <div id="result"></div>
+        <div id="status" class="hidden"></div>
+        <div id="result" class="hidden"></div>
     </div>
 
     <script>
         const NCBI_API_URL = 'https://blast.ncbi.nlm.nih.gov/Blast.cgi';
         let requestId = '';
 
+        document.getElementById('sampleSequences').addEventListener('change', function(e) {
+            document.getElementById('sequence').value = e.target.value;
+        });
+
         document.getElementById('blastForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const program = document.getElementById('program').value;
             const database = document.getElementById('database').value;
             const sequence = document.getElementById('sequence').value;
+            const maxResults = document.getElementById('maxResults').value;
             const statusDiv = document.getElementById('status');
             const resultDiv = document.getElementById('result');
 
-            statusDiv.innerHTML = 'שולח בקשת BLAST...';
+            statusDiv.innerHTML = '<div class="loading">שולח בקשת BLAST</div>';
+            statusDiv.classList.remove('hidden');
             resultDiv.innerHTML = '';
+            resultDiv.classList.add('hidden');
 
             try {
                 // שלב 1: שליחת בקשת BLAST
@@ -123,7 +173,7 @@
                 const putData = await putResponse.text();
                 requestId = putData.match(/RID = (.*)/)[1];
 
-                statusDiv.innerHTML = 'בקשה נשלחה. ממתין לתוצאות...';
+                statusDiv.innerHTML = '<div class="loading">ממתין לתוצאות</div>';
 
                 // שלב 2: בדיקת סטטוס וקבלת תוצאות
                 let status = '';
@@ -142,13 +192,28 @@
                 }
 
                 // שלב 3: קבלת תוצאות
-                const resultsResponse = await fetch(`${NCBI_API_URL}?CMD=Get&RID=${requestId}&FORMAT_TYPE=Text`, {
+                const resultsResponse = await fetch(`${NCBI_API_URL}?CMD=Get&RID=${requestId}&FORMAT_TYPE=JSON2_S&HITLIST_SIZE=${maxResults}`, {
                     method: 'GET'
                 });
-                const resultsData = await resultsResponse.text();
+                const resultsData = await resultsResponse.json();
 
                 statusDiv.innerHTML = 'התוצאות התקבלו!';
-                resultDiv.innerHTML = `<pre>${resultsData}</pre>`;
+                
+                // עיבוד והצגת התוצאות
+                let tableHTML = '<h2>תוצאות BLAST</h2><table class="result-table"><tr><th>תיאור</th><th>אחוז זהות</th><th>E-value</th><th>ציון התאמה</th></tr>';
+                
+                resultsData.BlastOutput2[0].report.results.search.hits.forEach(hit => {
+                    const description = hit.description[0].title;
+                    const identity = hit.hsps[0].identity;
+                    const evalue = hit.hsps[0].evalue;
+                    const score = hit.hsps[0].score;
+                    
+                    tableHTML += `<tr><td>${description}</td><td>${identity}%</td><td>${evalue}</td><td>${score}</td></tr>`;
+                });
+                
+                tableHTML += '</table>';
+                resultDiv.innerHTML = tableHTML;
+                resultDiv.classList.remove('hidden');
             } catch (error) {
                 statusDiv.innerHTML = `שגיאה: ${error.message}`;
             }
