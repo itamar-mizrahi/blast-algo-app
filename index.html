@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLAST השוואת רצפים</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        textarea {
+            height: 150px;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status, #result {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        #result pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BLAST השוואת רצפים</h1>
+        <form id="blastForm">
+            <label for="program">תוכנית BLAST:</label>
+            <select id="program" required>
+                <option value="blastn">blastn (נוקלאוטיד-נוקלאוטיד)</option>
+                <option value="blastp">blastp (חלבון-חלבון)</option>
+                <option value="blastx">blastx (נוקלאוטיד מתורגם-חלבון)</option>
+                <option value="tblastn">tblastn (חלבון-נוקלאוטיד מתורגם)</option>
+                <option value="tblastx">tblastx (נוקלאוטיד מתורגם-נוקלאוטיד מתורגם)</option>
+            </select>
+            
+            <label for="database">בסיס נתונים:</label>
+            <select id="database" required>
+                <option value="nt">Nucleotide collection (nt)</option>
+                <option value="nr">Non-redundant protein sequences (nr)</option>
+                <option value="refseq_rna">Reference RNA sequences</option>
+                <option value="refseq_protein">Reference proteins</option>
+                <option value="swissprot">UniProtKB/Swiss-Prot</option>
+            </select>
+            
+            <label for="sequence">רצף החיפוש:</label>
+            <textarea id="sequence" required placeholder="הכנס את רצף ה-DNA או החלבון כאן"></textarea>
+            
+            <button type="submit">בצע BLAST</button>
+        </form>
+        <div id="status"></div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const NCBI_API_URL = 'https://blast.ncbi.nlm.nih.gov/Blast.cgi';
+        let requestId = '';
+
+        document.getElementById('blastForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const program = document.getElementById('program').value;
+            const database = document.getElementById('database').value;
+            const sequence = document.getElementById('sequence').value;
+            const statusDiv = document.getElementById('status');
+            const resultDiv = document.getElementById('result');
+
+            statusDiv.innerHTML = 'שולח בקשת BLAST...';
+            resultDiv.innerHTML = '';
+
+            try {
+                // שלב 1: שליחת בקשת BLAST
+                const putResponse = await fetch(`${NCBI_API_URL}?CMD=Put&PROGRAM=${program}&DATABASE=${database}&QUERY=${encodeURIComponent(sequence)}`, {
+                    method: 'GET'
+                });
+                const putData = await putResponse.text();
+                requestId = putData.match(/RID = (.*)/)[1];
+
+                statusDiv.innerHTML = 'בקשה נשלחה. ממתין לתוצאות...';
+
+                // שלב 2: בדיקת סטטוס וקבלת תוצאות
+                let status = '';
+                while (status !== 'READY') {
+                    await new Promise(resolve => setTimeout(resolve, 5000)); // המתנה של 5 שניות
+
+                    const getResponse = await fetch(`${NCBI_API_URL}?CMD=Get&RID=${requestId}&FORMAT_OBJECT=SearchInfo`, {
+                        method: 'GET'
+                    });
+                    const getData = await getResponse.text();
+                    status = getData.match(/Status=(.*)/)[1];
+
+                    if (status === 'FAILED') {
+                        throw new Error('BLAST query failed');
+                    }
+                }
+
+                // שלב 3: קבלת תוצאות
+                const resultsResponse = await fetch(`${NCBI_API_URL}?CMD=Get&RID=${requestId}&FORMAT_TYPE=Text`, {
+                    method: 'GET'
+                });
+                const resultsData = await resultsResponse.text();
+
+                statusDiv.innerHTML = 'התוצאות התקבלו!';
+                resultDiv.innerHTML = `<pre>${resultsData}</pre>`;
+            } catch (error) {
+                statusDiv.innerHTML = `שגיאה: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
